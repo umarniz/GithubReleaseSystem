@@ -1,0 +1,105 @@
+
+// Specify the SDK Tagged version you want to use.
+// Try to place near the top so its easily modifiable by devs
+ext {
+    SenseSDKVersion = "v1.0"
+    GithubAccessToken = "YOUR_READ_ONLY_ACCESS_TOKEN"
+    SDKRepo = "https://api.github.com/repos/YOUR_NAME/YOUR_REPO"
+}
+
+// Gradle task to download SenseSDK
+// Place this at the bottom of build.gradle so you never have to deal with it
+import groovy.json.JsonSlurper
+
+task setupSenseSdk(type: Copy) {
+    def downloadSK = {
+        def downloadNewSDK = true
+
+        def versionFile = new File( 'libs/sense_sdk_version.txt' )
+        if ( versionFile.exists() ) {
+            String version = versionFile.text
+
+            if ( version == SenseSDKVersion ) {
+                println("Sense SDK already UP-TO-DATE")
+
+                downloadNewSDK = false
+            } else {
+                println "Changing SDK version from " + version + " to " + SenseSDKVersion
+
+                // We are going to create a new version file so lets just remove this one
+                versionFile.delete()
+            }
+        }
+
+        if ( downloadNewSDK ) {
+
+            // Remove any SDK we might have.
+            def exSDK = new File( 'libs/sense_android_sdk.aar' )
+            if ( exSDK.exists() ) {
+                exSDK.delete()
+            }
+
+            def json = ""
+
+            // Get download URL for SDK from github
+            try {
+                def response = new URL(SDKRepo + '/releases/tags/' + SenseSDKVersion + '?access_token=' + GithubAccessToken).text
+                json = new JsonSlurper().parseText(response);
+            }
+            catch ( e ) {
+                throw new GradleException("Failed to get response from server. Are you sure that " + SenseSDKVersion + " is a tagged build on github for Sense Android SDK?")
+            }
+
+            // Fetch URL for the asset
+            def url = json.assets[0].url + "?access_token=" + GithubAccessToken
+
+            // Zip file name
+            def zipFile = SenseSDKVersion + '.zip'
+
+            // Create the zip file
+            def downloadedSDKZip = new File(zipFile)
+
+            // Download the file
+            if (!downloadedSDKZip.exists()) {
+                // Let the user know we are on it
+                println "Downloading Sense-Android-SDK-" + SenseSDKVersion + ".zip"
+
+                URL http = new URL(url)
+                URLConnection urlConnection = http.openConnection()
+                urlConnection.setRequestProperty("Accept", "application/octet-stream")
+
+                urlConnection.inputStream.withStream {
+                    downloadedSDKZip.bytes = it.bytes
+                }
+
+                // All done
+                println "Finished downloading!"
+            } else {
+                println "The SDK zip file was already downloaded! Did we fail to cleanup last time?"
+            }
+
+            println "Extracting files from SDK"
+
+            def ant = new groovy.util.AntBuilder();   // create an antbuilder
+            ant.unzip(  src: SenseSDKVersion + ".zip", dest:"libs/",  overwrite:"true") {
+                patternset() {
+                    include(name: "*.aar")
+                };
+            };
+
+            // Create version file
+            versionFile.text = SenseSDKVersion
+
+            // Remove downloaded SDK
+            downloadedSDKZip.delete()
+
+            println "Successfully set up SDK!"
+        }
+    }
+
+    downloadSK()
+}
+
+tasks.withType(JavaCompile) {
+    compileTask -> compileTask.dependsOn setupSenseSdk
+}
